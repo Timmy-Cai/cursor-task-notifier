@@ -1,0 +1,4 @@
+node_modules/
+out/
+# 保留最新 vsix 供分发
+!cursor-task-notifier-*.vsix

@@ -1,0 +1,13 @@
+# Cursor Agent 任务完成通知配置
+# 由 Cursor Task Notifier 扩展自动管理，请勿手动修改
+# 如需修改，请前往 Cursor 设置页 → Extensions → Cursor Task Notifier
+
+NOTIFY_ENABLED=true
+
+NOTIFY_SOUND=true
+NOTIFY_SOUND_FILE=/System/Library/Sounds/Funk.aiff
+
+NOTIFY_VOICE=true
+NOTIFY_VOICE_NAME=Meijia
+
+NOTIFY_BANNER=true

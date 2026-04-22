@@ -1,0 +1,123 @@
+{
+  "name": "cursor-task-notifier",
+  "displayName": "Cursor Task Notifier",
+  "description": "Cursor Agent 任务完成通知配置 — 在设置页一键管理提示音、语音播报、横幅推送",
+  "version": "0.4.0",
+  "publisher": "local",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["Other"],
+  "keywords": ["cursor", "notification", "agent", "hook"],
+  "activationEvents": ["onStartupFinished"],
+  "main": "./out/extension.js",
+  "contributes": {
+    "configuration": [
+      {
+        "id": "enabled",
+        "title": "Cursor Task Notifier",
+        "order": 1,
+        "properties": {
+          "cursorTaskNotifier.enabled": {
+            "type": "boolean",
+            "default": true,
+            "description": "总开关：Agent 任务完成后是否触发通知（关闭后其余设置无效）"
+          }
+        }
+      },
+      {
+        "id": "banner",
+        "title": "Cursor Task Notifier: 横幅推送",
+        "order": 2,
+        "properties": {
+          "cursorTaskNotifier.banner": {
+            "type": "boolean",
+            "default": true,
+            "description": "横幅推送：macOS 右上角推送通知（含任务描述，点击跳回 Cursor）"
+          }
+        }
+      },
+      {
+        "id": "sound",
+        "title": "Cursor Task Notifier: 提示音",
+        "order": 3,
+        "properties": {
+          "cursorTaskNotifier.sound": {
+            "type": "boolean",
+            "default": true,
+            "description": "提示音：任务完成时播放系统提示音"
+          },
+          "cursorTaskNotifier.soundName": {
+            "type": "string",
+            "default": "Glass",
+            "description": "音效选择（切换时自动试听）",
+            "enum": [
+              "Basso", "Blow", "Bottle", "Frog", "Funk", "Glass",
+              "Hero", "Morse", "Ping", "Pop", "Purr", "Sosumi", "Submarine", "Tink"
+            ],
+            "enumDescriptions": [
+              "Basso — 低沉鼓声", "Blow — 轻柔吹气", "Bottle — 瓶口吹气",
+              "Frog — 青蛙叫声", "Funk — 律动短音", "Glass — 清脆玻璃音（默认）",
+              "Hero — 史诗英雄音", "Morse — 摩尔斯电报", "Ping — 清脆短促",
+              "Pop — 气泡破裂", "Purr — 猫咪呼噜", "Sosumi — 经典系统音",
+              "Submarine — 潜艇声纳", "Tink — 金属轻敲"
+            ]
+          }
+        }
+      },
+      {
+        "id": "voice",
+        "title": "Cursor Task Notifier: 语音播报",
+        "order": 4,
+        "properties": {
+          "cursorTaskNotifier.voice": {
+            "type": "boolean",
+            "default": true,
+            "description": "语音播报：用中文语音说出项目名和「任务完成」"
+          },
+          "cursorTaskNotifier.voiceName": {
+            "type": "string",
+            "default": "Meijia",
+            "description": "语音音色选择（切换时自动试听）",
+            "enum": [
+              "Meijia", "Tingting", "Sinji",
+              "Grandma (中文（中国大陆）)", "Grandpa (中文（中国大陆）)",
+              "Flo (中文（中国大陆）)", "Reed (中文（中国大陆）)"
+            ],
+            "enumDescriptions": [
+              "美佳 — 台湾女声，清甜温柔（默认）", "婷婷 — 普通话女声，标准清晰",
+              "善怡 — 粤语女声，香港口音", "奶奶 — 普通话女声，亲切温暖",
+              "爷爷 — 普通话男声，沉稳厚重", "Flo — 普通话女声，活泼明快",
+              "Reed — 普通话男声，干净利落"
+            ]
+          }
+        }
+      }
+    ],
+    "commands": [
+      {
+        "command": "cursorTaskNotifier.openConf",
+        "title": "Cursor Task Notifier: 打开配置文件"
+      },
+      {
+        "command": "cursorTaskNotifier.testNotify",
+        "title": "Cursor Task Notifier: 发送测试通知"
+      },
+      {
+        "command": "cursorTaskNotifier.showStatus",
+        "title": "Cursor Task Notifier: 查看当前状态"
+      }
+    ]
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "npm run compile && npx vsce package --no-dependencies"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.3.0",
+    "@vscode/vsce": "^2.24.0"
+  }
+}
