@@ -247,6 +247,22 @@ Cursor 设置页修改开关
 
 ## 系统要求
 
-- macOS
-- [Cursor](https://cursor.sh) IDE
-- [Homebrew](https://brew.sh)（用于安装 terminal-notifier）
+| 依赖 | 要求 | 说明 |
+|---|---|---|
+| 操作系统 | macOS 13 Ventura 及以上 | 依赖 `lsappinfo` 前台检测 |
+| [Cursor](https://cursor.sh) | 最新版 | 需支持 Hook 机制（2.x+）|
+| [Homebrew](https://brew.sh) | 任意版本 | 用于安装 terminal-notifier |
+| terminal-notifier | 自动安装 | 负责 macOS 横幅推送 |
+| Python3 | 系统自带即可 | 解析 Hook 事件 JSON |
+| Xcode Command Line Tools | 可选 | 编译 `raise-cursor`（点击通知跳回 Cursor）|
+| 中文语音包 | 可选 | 语音播报功能需在系统设置中下载 |
+
+**安装 Xcode Command Line Tools（如缺失）：**
+
+```bash
+xcode-select --install
+```
+
+**下载中文语音包：**
+
+系统设置 → 辅助功能 → 朗读内容 → 系统语音 → 管理语音 → 下载「美佳」或其他中文语音
