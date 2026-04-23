@@ -29,9 +29,8 @@
 
 ### 一键安装
 
-```
-curosr 应用市场搜索 Cursor Task Notifier
-```
+在 **[Open VSX Registry](https://open-vsx.org)** 中搜索 **Cursor Task Notifier** 并安装；也可在 Cursor 的扩展视图中直接搜索同一关键词。若你从 Open VSX 侧载或按发布页说明升级，以 [open-vsx.org](https://open-vsx.org) 上该扩展的发布信息为准。
+
 ![img_1.png](img_1.png)
 
 
