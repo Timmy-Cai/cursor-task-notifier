@@ -30,40 +30,18 @@
 
 ## 安装说明
 
-### 一键安装（推荐）
+### 一键安装
 
-```bash
-git clone https://github.com/Timmy-Cai/cursor-task-notifier.git
-cd cursor-task-notifier
-bash install.sh
 ```
+curosr 应用市场搜索 Cursor Task Notifier
+```
+![img_1.png](img_1.png)
 
-安装脚本会自动完成以下所有步骤：
-
-- ✅ 检查并安装 `terminal-notifier`（Homebrew）
-- ✅ 复制 hook 脚本到 `~/.cursor/hooks/`
-- ✅ 合并注册 `hooks.json`（不覆盖已有配置）
-- ✅ 编译 `raise-cursor` 可执行文件（点击通知跳回 Cursor）
-- ✅ 安装 Cursor 扩展（`.vsix`）
 
 安装完成后需手动完成两步：
 
-1. **重启 Cursor**（必须，让 Hook 和扩展生效）
+1. **重启 Cursor**
 2. **开通通知权限**：系统设置 → 通知 → `terminal-notifier` → 改为「横幅」或「提醒」
-
-### 文件结构
-
-```plaintext
-~/.cursor/
-├── hooks.json                  # Hook 注册配置，监听 Agent stop 事件
-├── hooks/
-│   ├── task-done.sh            # 通知执行脚本（核心）
-│   ├── task-done.conf          # 通知配置（由 Cursor 扩展自动管理）
-│   └── raise-cursor            # 点击通知跳回 Cursor 的可执行文件
-├── rules/
-│   └── task-notify.mdc         # AI 规则：大任务前主动询问是否开启通知
-└── task-done.log               # 任务完成历史日志（自动生成）
-```
 
 ---
 
@@ -84,18 +62,18 @@ bash install.sh
 
 ```plaintext
 ┌─────────────────────────────────────────┐
-│ ✅ broker · 任务完成                     │
-│    帮我查一下发送短信逻辑                 │
+│ ✅ xxx · 任务完成                     │
 │                        [点击跳回 Cursor] │
 └─────────────────────────────────────────┘
 ```
 
-语音播报：「**broker 项目任务完成，请查看结果**」
+语音播报：「**xxx 项目任务完成，请查看结果**」
 
-### 在 Cursor 设置页配置（推荐）
+### 在 Cursor 设置页配置
 
-安装完成后，在 Cursor 设置页（`Cmd+,`）搜索 `cursorTaskNotifier`，即可通过 UI 开关管理所有配置，**无需手动编辑文件**。
+安装完成后，在 Cursor 设置页搜索 `cursorTaskNotifier`，即可通过 UI 开关管理所有配置，**无需手动编辑文件**。
 
+![img.png](img.png)
 配置分为 4 个分组，从上到下依次为：
 
 | 分组 | 配置项 | 说明 |
@@ -121,38 +99,6 @@ bash install.sh
 | Flo | 普通话女声，活泼明快 |
 | Reed | 普通话男声，干净利落 |
 
-### 查看历史日志
-
-即使错过了通知，也可以通过日志回溯所有完成记录：
-
-```bash
-# 查看最近 20 条
-tail -20 ~/.cursor/task-done.log
-
-# 查看今天的
-grep "$(date +%Y-%m-%d)" ~/.cursor/task-done.log
-
-# 查看指定项目
-grep "broker" ~/.cursor/task-done.log
-```
-
-日志格式示例：
-
-```plaintext
-[2026-04-19 14:32:01] broker | 帮我查一下发送短信逻辑
-[2026-04-19 14:28:45] user_center | 检查登录逻辑
-```
-
-### 手动测试
-
-切到其他 App 后，在终端运行：
-
-```bash
-cat /tmp/cursor-hook-debug.json | bash ~/.cursor/hooks/task-done.sh
-```
-
----
-
 ## 常见问题
 
 ### 收不到右上角推送怎么办？
@@ -174,14 +120,6 @@ cat /tmp/cursor-hook-debug.json | bash ~/.cursor/hooks/task-done.sh
 
    从屏幕右上角向下滑，查看通知中心积压的通知
 
-4. **确认脚本执行正常**
-
-```bash
-# 查看调试日志，确认 Hook 收到了数据
-cat /tmp/cursor-hook-debug.json
-```
-
-如果文件不存在或内容为空，说明 Hook 未触发，需检查 `hooks.json` 路径并重启 Cursor。
 
 ### 收不到语音播报怎么办？
 
@@ -193,57 +131,11 @@ say -v "Meijia" "测试"
 # 系统设置 → 辅助功能 → 朗读内容 → 系统语音 → 管理语音
 ```
 
-### Hook 未触发怎么办？
-
-1. 检查 `~/.cursor/hooks.json` 格式是否正确（JSON 不能有语法错误）
-2. 确认脚本有执行权限：`ls -la ~/.cursor/hooks/task-done.sh`（应有 `x` 标志）
-3. 在 Cursor 设置 → Hooks 标签页查看 Hook 加载状态
-4. 重启 Cursor
-
 ### 多个任务同时完成，通知会叠加吗？
 
-不会。每个 Agent 会话有唯一的 `conversation_id`，内置去重机制确保同一任务 **60 秒内只触发一次**。
+不会。
 
 ---
-
-## 系统架构
-
-```plaintext
-Cursor Agent 完成（stop 事件触发）
-           │
-           ▼
-    hooks.json 路由
-           │
-           ▼
-    task-done.sh 执行
-    │
-    ├─ 读取 task-done.conf（总开关检查）
-    ├─ 解析事件 JSON（提取项目名、会话ID、transcript 路径）
-    ├─ 读取 transcript（提取最后一条用户指令）
-    ├─ 去重检测（同一 conversation_id 60s 内只触发一次）
-    ├─ lsappinfo 检测前台应用
-    │      └─ Cursor 在前台 → exit 0（静默）
-    │
-    ├─ 🔔 afplay（提示音）        ▶ 并发执行
-    ├─ 🗣  say（语音播报）        ▶ 并发执行
-    ├─ 📬 terminal-notifier（右上角推送）  ▶ 并发执行
-    └─ 📝 追加写入 task-done.log
-```
-
-**Cursor 扩展（cursor-task-notifier）的作用：**
-
-```plaintext
-Cursor 设置页修改开关
-           │
-           ▼
-  onDidChangeConfiguration 事件
-           │
-           ▼
-    自动写入 task-done.conf ← 屏蔽 fs.watch 反弹
-           │
-           ▼
-    切换音效 / 音色时自动试听（去重，只播一遍）
-```
 
 ## 系统要求
 
@@ -262,7 +154,3 @@ Cursor 设置页修改开关
 ```bash
 xcode-select --install
 ```
-
-**下载中文语音包：**
-
-系统设置 → 辅助功能 → 朗读内容 → 系统语音 → 管理语音 → 下载「美佳」或其他中文语音
