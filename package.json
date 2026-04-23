@@ -2,8 +2,13 @@
   "name": "cursor-task-notifier",
   "displayName": "Cursor Task Notifier",
   "description": "Cursor Agent 任务完成通知配置 — 在设置页一键管理提示音、语音播报、横幅推送",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "publisher": "timmy-ai",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Timmy-Cai/cursor-task-notifier.git"
+  },
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -112,12 +117,14 @@
   "scripts": {
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "package": "npm run compile && npx vsce package --no-dependencies"
+    "package": "npm run compile && npx vsce package --no-dependencies",
+    "release:ovsx": "npm run package && npx ovsx publish cursor-task-notifier-$(node -p \"require('./package.json').version\").vsix"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
     "@types/vscode": "^1.85.0",
     "typescript": "^5.3.0",
-    "@vscode/vsce": "^2.24.0"
+    "@vscode/vsce": "^2.24.0",
+    "ovsx": "^0.10.0"
   }
 }

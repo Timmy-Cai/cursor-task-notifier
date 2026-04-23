@@ -29,7 +29,7 @@
 
 ### 一键安装
 
-在 **[Open VSX Registry](https://open-vsx.org)** 中搜索 **Cursor Task Notifier** 并安装；也可在 Cursor 的扩展视图中直接搜索同一关键词。若你从 Open VSX 侧载或按发布页说明升级，以 [open-vsx.org](https://open-vsx.org) 上该扩展的发布信息为准。
+Cursor 的扩展视图中直接搜索同一名称
 
 ![img_1.png](img_1.png)
 
@@ -140,8 +140,8 @@ say -v "Meijia" "测试"
 | 依赖 | 要求 | 说明 |
 |---|---|---|
 | 操作系统 | macOS 13 Ventura 及以上 | 依赖 `lsappinfo` 前台检测 |
-| [Cursor](https://cursor.sh) | 最新版 | 需支持 Hook 机制（2.x+）|
-| [Homebrew](https://brew.sh) | 任意版本 | 用于安装 terminal-notifier |
+| Cursor | 最新版 | 需支持 Hook 机制（2.x+）|
+| Homebrew | 任意版本 | 用于安装 terminal-notifier |
 | terminal-notifier | 自动安装 | 负责 macOS 横幅推送 |
 | Python3 | 系统自带即可 | 解析 Hook 事件 JSON |
 | Xcode Command Line Tools | 可选 | 编译 `raise-cursor`（点击通知跳回 Cursor）|
