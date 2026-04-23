@@ -23,9 +23,6 @@
 | 📝 本地日志 | 错过通知也能回溯 |
 
 **核心策略**：Cursor 在前台时静默，不在前台时才通知，不打扰正常操作。
-
-**开源地址**：https://github.com/Timmy-Cai/cursor-task-notifier
-
 ---
 
 ## 安装说明
