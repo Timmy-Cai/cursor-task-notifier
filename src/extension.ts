@@ -5,6 +5,10 @@ import * as os from 'os';
 import { execSync } from 'child_process';
 
 const EXT_ID = 'cursorTaskNotifier';
+const INSTALLED_VERSION_KEY = 'cursorTaskNotifier.installedAssetVersion';
+// 每次修改 hooks/ 里的脚本内容，这个版本号 +1，触发旧用户的 hook 脚本覆盖升级
+const ASSET_VERSION = 4;
+
 const CONF_COMMENT = `# Cursor Agent 任务完成通知配置
 # 由 Cursor Task Notifier 扩展自动管理，请勿手动修改
 # 如需修改，请前往 Cursor 设置页 → Extensions → Cursor Task Notifier
@@ -27,8 +31,23 @@ const SOUND_FILES: Record<string, string> = {
     Tink: '/System/Library/Sounds/Tink.aiff',
 };
 
+function getCursorDir(): string {
+    return path.join(os.homedir(), '.cursor');
+}
+function getHooksDir(): string {
+    return path.join(getCursorDir(), 'hooks');
+}
 function getConfPath(): string {
-    return path.join(os.homedir(), '.cursor', 'hooks', 'task-done.conf');
+    return path.join(getHooksDir(), 'task-done.conf');
+}
+function getHookScriptPath(): string {
+    return path.join(getHooksDir(), 'task-done.sh');
+}
+function getRaiseCursorBinPath(): string {
+    return path.join(getHooksDir(), 'raise-cursor');
+}
+function getHooksJsonPath(): string {
+    return path.join(getCursorDir(), 'hooks.json');
 }
 
 function boolLine(key: string, value: boolean): string {
@@ -123,9 +142,262 @@ async function syncConfToVscode(confPath: string): Promise<void> {
     }
 }
 
+// ────────────────────────────────────────────────────────────────
+// 资源部署：确保 hook 脚本、hooks.json、raise-cursor 都存在
+// ────────────────────────────────────────────────────────────────
+
+interface DeployResult {
+    isFirstInstall: boolean;
+    hookScriptDeployed: boolean;
+    hooksJsonRegistered: boolean;
+    terminalNotifierFound: boolean;
+    raiseCursorAvailable: boolean;
+    errors: string[];
+}
+
+function findTerminalNotifier(): string | undefined {
+    const candidates = [
+        '/opt/homebrew/bin/terminal-notifier',
+        '/usr/local/bin/terminal-notifier',
+    ];
+    for (const p of candidates) {
+        if (fs.existsSync(p)) {
+            return p;
+        }
+    }
+    try {
+        const out = execSync('command -v terminal-notifier', { encoding: 'utf-8' }).trim();
+        if (out && fs.existsSync(out)) {
+            return out;
+        }
+    } catch {
+        // 没找到
+    }
+    return undefined;
+}
+
+function deployHookScript(extensionPath: string): boolean {
+    const src = path.join(extensionPath, 'hooks', 'task-done.sh');
+    const dst = getHookScriptPath();
+    if (!fs.existsSync(src)) {
+        return false;
+    }
+    const dir = path.dirname(dst);
+    if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+    }
+    fs.copyFileSync(src, dst);
+    try {
+        fs.chmodSync(dst, 0o755);
+    } catch {
+        // ignore
+    }
+    return true;
+}
+
+function deployRaiseCursor(extensionPath: string): boolean {
+    const dst = getRaiseCursorBinPath();
+    if (fs.existsSync(dst)) {
+        return true;
+    }
+    const swiftSrc = path.join(extensionPath, 'hooks', 'raise-cursor.swift');
+    if (!fs.existsSync(swiftSrc)) {
+        return false;
+    }
+    try {
+        execSync(`swiftc "${swiftSrc}" -o "${dst}"`, { timeout: 60000, stdio: 'ignore' });
+        return fs.existsSync(dst);
+    } catch {
+        return false;
+    }
+}
+
+function registerHooksJson(): boolean {
+    const hooksJsonPath = getHooksJsonPath();
+    const dir = path.dirname(hooksJsonPath);
+    if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+    }
+
+    const hookEntry = { command: 'hooks/task-done.sh', timeout: 15 };
+
+    interface HookEntry { command?: string; timeout?: number; [k: string]: unknown }
+    interface HooksJson { version?: number; hooks?: { stop?: HookEntry[]; [k: string]: HookEntry[] | undefined } }
+
+    let data: HooksJson = { version: 1, hooks: { stop: [] } };
+    if (fs.existsSync(hooksJsonPath)) {
+        try {
+            const raw = fs.readFileSync(hooksJsonPath, 'utf-8');
+            data = JSON.parse(raw) as HooksJson;
+        } catch {
+            // 文件损坏时用默认结构覆盖，但做个备份
+            try {
+                fs.copyFileSync(hooksJsonPath, `${hooksJsonPath}.bak-${Date.now()}`);
+            } catch { /* ignore */ }
+        }
+    }
+
+    if (!data.hooks) { data.hooks = {}; }
+    if (!Array.isArray(data.hooks.stop)) { data.hooks.stop = []; }
+    if (data.version === undefined) { data.version = 1; }
+
+    const stopHooks = data.hooks.stop;
+    const alreadyRegistered = stopHooks.some((h) => typeof h?.command === 'string' && h.command.includes('task-done.sh'));
+    if (!alreadyRegistered) {
+        stopHooks.push(hookEntry);
+    }
+
+    fs.writeFileSync(hooksJsonPath, JSON.stringify(data, null, 2), 'utf-8');
+    // 额外 touch 一次 mtime，最大化 Cursor fs.watch 触发概率（官方声明 hooks.json 是热监听的）
+    try {
+        const now = new Date();
+        fs.utimesSync(hooksJsonPath, now, now);
+    } catch { /* ignore */ }
+    return true;
+}
+
+function ensureHooksInstalled(
+    context: vscode.ExtensionContext,
+    config: vscode.WorkspaceConfiguration,
+): DeployResult {
+    const errors: string[] = [];
+    const installedVer = context.globalState.get<number>(INSTALLED_VERSION_KEY, 0);
+    const isFirstInstall = installedVer === 0;
+    const needUpgrade = installedVer < ASSET_VERSION;
+
+    let hookScriptDeployed = fs.existsSync(getHookScriptPath());
+    if (!hookScriptDeployed || needUpgrade) {
+        try {
+            hookScriptDeployed = deployHookScript(context.extensionPath);
+            if (!hookScriptDeployed) {
+                errors.push('task-done.sh 部署失败（扩展包内缺少 hooks/task-done.sh）');
+            }
+        } catch (e) {
+            errors.push(`部署 task-done.sh 失败：${e}`);
+        }
+    }
+
+    let hooksJsonRegistered = false;
+    try {
+        hooksJsonRegistered = registerHooksJson();
+    } catch (e) {
+        errors.push(`写入 hooks.json 失败：${e}`);
+    }
+
+    if (!fs.existsSync(getConfPath())) {
+        try {
+            writeConf(getConfPath(), config);
+        } catch (e) {
+            errors.push(`写入 task-done.conf 失败：${e}`);
+        }
+    }
+
+    const raiseCursorAvailable = deployRaiseCursor(context.extensionPath);
+    const terminalNotifierFound = !!findTerminalNotifier();
+
+    context.globalState.update(INSTALLED_VERSION_KEY, ASSET_VERSION);
+
+    return {
+        isFirstInstall,
+        hookScriptDeployed,
+        hooksJsonRegistered,
+        terminalNotifierFound,
+        raiseCursorAvailable,
+        errors,
+    };
+}
+
+async function showInstallGuidance(
+    context: vscode.ExtensionContext,
+    result: DeployResult,
+): Promise<void> {
+    if (result.errors.length > 0) {
+        vscode.window.showErrorMessage(
+            `Cursor Task Notifier 初始化遇到问题：${result.errors.join('；')}`
+        );
+    }
+
+    // 首次安装：零重启、开箱即用引导。
+    // Cursor 官方保证 hooks.json 是热监听的，扩展写完后立刻生效，无需重启。
+    // 主动触发一次演示通知，强制 macOS 权限对话框弹出，用户当场看见并授权。
+    if (result.isFirstInstall) {
+        const msg = 'Cursor Task Notifier 已就绪，Agent 任务完成后会自动推送 macOS 横幅。'
+            + '首次触发时 macOS 会弹「脚本编辑器」的通知权限申请，请点「允许」。';
+
+        const actions: string[] = ['立即发送演示通知', '打开通知权限设置'];
+        if (!result.terminalNotifierFound) {
+            actions.push('启用点击跳回（可选）');
+        }
+        actions.push('知道了');
+
+        const picked = await vscode.window.showInformationMessage(msg, ...actions);
+        if (picked === '立即发送演示通知') {
+            await fireDemoNotification();
+        } else if (picked === '打开通知权限设置') {
+            try {
+                execSync('open "x-apple.systempreferences:com.apple.preference.notifications"');
+            } catch { /* ignore */ }
+        } else if (picked === '启用点击跳回（可选）') {
+            await installTerminalNotifier();
+        }
+        return;
+    }
+    // 非首次：不再弹窗打扰。状态可在「查看当前状态」命令里看。
+    void context;
+}
+
+async function fireDemoNotification(): Promise<void> {
+    const script = getHookScriptPath();
+    if (!fs.existsSync(script)) {
+        vscode.window.showErrorMessage('Hook 脚本未部署，请重新加载窗口后重试。');
+        return;
+    }
+    const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? os.homedir();
+    const mock = JSON.stringify({
+        conversation_id: `demo-${Date.now()}`,
+        transcript_path: '',
+        workspace_roots: [workspaceRoot],
+    });
+    // 通过 CURSOR_NOTIFIER_TEST=1 跳过前台检测和去重，确保当前即便在 Cursor 前台也能看到通知
+    try {
+        execSync(`echo '${mock.replace(/'/g, "'\\''")}' | CURSOR_NOTIFIER_TEST=1 bash "${script}"`,
+            { timeout: 10000 });
+    } catch {
+        // 脚本后台化了提示音/语音/通知，同步返回的 exit code 可能非 0，忽略
+    }
+    vscode.window.showInformationMessage(
+        '演示通知已发出。如果没看到横幅，请检查「系统设置 → 通知 → 脚本编辑器」是否允许通知。'
+    );
+}
+
+async function installTerminalNotifier(): Promise<void> {
+    try {
+        execSync('command -v brew', { stdio: 'ignore' });
+    } catch {
+        vscode.window.showErrorMessage(
+            '未检测到 Homebrew，请先安装 Homebrew（https://brew.sh），再执行 brew install terminal-notifier。'
+            + '（注意：terminal-notifier 只是可选增强，不装也能正常弹横幅）'
+        );
+        return;
+    }
+
+    const terminal = vscode.window.createTerminal({ name: 'Install terminal-notifier' });
+    terminal.show();
+    terminal.sendText('brew install terminal-notifier');
+    vscode.window.showInformationMessage(
+        '已在终端发起 brew install terminal-notifier，安装完成后重启 Cursor 即可启用点击横幅跳回功能。'
+    );
+}
+
 export function activate(context: vscode.ExtensionContext): void {
     const config = vscode.workspace.getConfiguration(EXT_ID);
     const confPath = getConfPath();
+
+    // 先部署 hook 运行所需的一切资源
+    const deployResult = ensureHooksInstalled(context, config);
+
+    // 异步弹引导（不阻塞 activate）
+    showInstallGuidance(context, deployResult).catch(() => {});
 
     if (fs.existsSync(confPath)) {
         syncConfToVscode(confPath).catch(() => {});
@@ -165,11 +437,9 @@ export function activate(context: vscode.ExtensionContext): void {
             try {
                 isWritingConf = true;
                 writeConf(targetPath, updated);
-                // 延迟解锁，覆盖 macOS fs.watch 的多次回调窗口
                 setTimeout(() => { isWritingConf = false; }, 500);
                 updateStatusBar(statusBar, updated);
 
-                // 切换音效时立即试听（只播一遍）
                 if (e.affectsConfiguration(`${EXT_ID}.soundName`)) {
                     const soundName = updated.get<string>('soundName', 'Glass');
                     const soundFile = SOUND_FILES[soundName ?? 'Glass'] ?? SOUND_FILES['Glass'];
@@ -180,7 +450,6 @@ export function activate(context: vscode.ExtensionContext): void {
                     });
                 }
 
-                // 切换语音音色时立即试听（只播一遍）
                 if (e.affectsConfiguration(`${EXT_ID}.voiceName`)) {
                     const voiceName = updated.get<string>('voiceName', 'Meijia');
                     previewOnce('voiceName', voiceName ?? 'Meijia', () => {
@@ -206,11 +475,9 @@ export function activate(context: vscode.ExtensionContext): void {
         try {
             let watchDebounce: NodeJS.Timeout | undefined;
             fsWatcher = fs.watch(p, () => {
-                // 扩展自己写文件时忽略回调，防止反弹循环
                 if (isWritingConf) {
                     return;
                 }
-                // 防抖：macOS 单次写入可能触发多次事件，合并为一次同步
                 clearTimeout(watchDebounce);
                 watchDebounce = setTimeout(() => {
                     syncConfToVscode(p).catch(() => {});
@@ -235,29 +502,8 @@ export function activate(context: vscode.ExtensionContext): void {
     );
 
     context.subscriptions.push(
-        vscode.commands.registerCommand('cursorTaskNotifier.testNotify', () => {
-            try {
-                const script = path.join(os.homedir(), '.cursor', 'hooks', 'task-done.sh');
-                const debugJson = '/tmp/cursor-hook-debug.json';
-                if (!fs.existsSync(debugJson)) {
-                    vscode.window.showWarningMessage(
-                        '找不到 /tmp/cursor-hook-debug.json，请先让 Agent 完成一个任务以生成测试数据'
-                    );
-                    return;
-                }
-                vscode.window.showInformationMessage(
-                    '请先切换到其他应用（如 Finder），3 秒后触发通知'
-                );
-                setTimeout(() => {
-                    try {
-                        execSync(`cat ${debugJson} | bash ${script}`, { timeout: 10000 });
-                    } catch {
-                        // 脚本正常退出码也可能是非 0，忽略
-                    }
-                }, 1000);
-            } catch (err) {
-                vscode.window.showErrorMessage(`测试通知执行失败：${err}`);
-            }
+        vscode.commands.registerCommand('cursorTaskNotifier.testNotify', async () => {
+            await fireDemoNotification();
         })
     );
 
@@ -266,24 +512,44 @@ export function activate(context: vscode.ExtensionContext): void {
             const cfg = vscode.workspace.getConfiguration(EXT_ID);
             const p = getConfPath();
             const exists = fs.existsSync(p);
+            const hookScriptExists = fs.existsSync(getHookScriptPath());
+            const hooksJsonExists = fs.existsSync(getHooksJsonPath());
+            const tnPath = findTerminalNotifier();
+            const raiseOk = fs.existsSync(getRaiseCursorBinPath());
             const panel = vscode.window.createWebviewPanel(
                 'taskNotifierStatus',
                 'Task Notifier 状态',
                 vscode.ViewColumn.One,
                 {}
             );
-            panel.webview.html = buildStatusHtml(cfg, p, exists);
+            panel.webview.html = buildStatusHtml(cfg, p, exists, {
+                hookScriptExists,
+                hooksJsonExists,
+                terminalNotifierPath: tnPath,
+                raiseCursorExists: raiseOk,
+            });
         })
     );
+}
+
+interface RuntimeStatus {
+    hookScriptExists: boolean;
+    hooksJsonExists: boolean;
+    terminalNotifierPath: string | undefined;
+    raiseCursorExists: boolean;
 }
 
 function buildStatusHtml(
     cfg: vscode.WorkspaceConfiguration,
     confPath: string,
-    confExists: boolean
+    confExists: boolean,
+    runtime: RuntimeStatus
 ): string {
     const row = (label: string, value: boolean) =>
         `<tr><td>${label}</td><td>${value ? '<span class="on">✅ 开启</span>' : '<span class="off">🔕 关闭</span>'}</td></tr>`;
+
+    const existRow = (label: string, ok: boolean, okText = '✅ 已就绪', noText = '❌ 缺失') =>
+        `<tr><td>${label}</td><td>${ok ? `<span class="on">${okText}</span>` : `<span class="off">${noText}</span>`}</td></tr>`;
 
     const soundName = cfg.get<string>('soundName', 'Glass');
     const voiceName = cfg.get<string>('voiceName', 'Meijia');
@@ -295,18 +561,21 @@ function buildStatusHtml(
 <style>
   body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; padding: 24px; color: var(--vscode-foreground); background: var(--vscode-editor-background); }
   h2 { font-size: 18px; margin-bottom: 16px; }
-  table { border-collapse: collapse; width: 100%; max-width: 520px; }
+  h3 { font-size: 14px; margin: 24px 0 8px; color: var(--vscode-descriptionForeground); }
+  table { border-collapse: collapse; width: 100%; max-width: 560px; }
   td { padding: 10px 14px; border-bottom: 1px solid var(--vscode-panel-border); }
   td:first-child { color: var(--vscode-descriptionForeground); width: 40%; }
   .on { color: #4ec994; font-weight: 600; }
   .off { color: #f48771; font-weight: 600; }
   .accent { color: #79c0ff; font-weight: 600; }
-  .path { font-size: 12px; color: var(--vscode-descriptionForeground); margin-top: 20px; word-break: break-all; }
+  .path { font-size: 12px; color: var(--vscode-descriptionForeground); margin-top: 12px; word-break: break-all; }
   .hint { margin-top: 16px; font-size: 13px; color: var(--vscode-descriptionForeground); }
 </style>
 </head>
 <body>
 <h2>🔔 Cursor Task Notifier — 当前状态</h2>
+
+<h3>开关</h3>
 <table>
   ${row('总开关', cfg.get<boolean>('enabled', true))}
   ${row('提示音', cfg.get<boolean>('sound', true))}
@@ -314,10 +583,30 @@ function buildStatusHtml(
   ${row('语音播报', cfg.get<boolean>('voice', true))}
   <tr><td>语音音色</td><td><span class="accent">🗣️ ${voiceName}</span></td></tr>
   ${row('横幅推送', cfg.get<boolean>('banner', true))}
-  <tr><td>conf 文件</td><td>${confExists ? '<span class="on">✅ 存在</span>' : '<span class="off">❌ 不存在</span>'}</td></tr>
 </table>
+
+<h3>运行时依赖</h3>
+<table>
+  ${existRow('task-done.sh (Hook 脚本)', runtime.hookScriptExists)}
+  ${existRow('hooks.json (Cursor 注册)', runtime.hooksJsonExists)}
+  ${existRow('task-done.conf', confExists)}
+</table>
+
+<h3>横幅推送通道</h3>
+<table>
+  <tr><td>当前使用</td><td>${runtime.terminalNotifierPath
+      ? `<span class="accent">🚀 terminal-notifier（增强版，支持点击跳回）</span>`
+      : `<span class="accent">🍎 osascript（系统自带，零依赖）</span>`}</td></tr>
+  <tr><td>terminal-notifier</td><td>${runtime.terminalNotifierPath
+      ? `<span class="on">✅ ${runtime.terminalNotifierPath}</span>`
+      : `<span class="off">⚪ 未安装（可选，不影响基础功能）</span>`}</td></tr>
+  ${existRow('raise-cursor (点击跳回)', runtime.raiseCursorExists,
+      '✅ 已就绪', '⚪ 未部署（需 terminal-notifier 才能用）')}
+</table>
+
 <p class="path">📁 ${confPath}</p>
-<p class="hint">在 Cursor 设置页搜索 <strong>cursorTaskNotifier</strong> 即可修改配置，切换音效 / 语音时会立即试听。</p>
+<p class="hint">横幅推送默认走 macOS 自带的 osascript，<strong>无需任何安装</strong>。首次弹通知前 macOS 会请求「脚本编辑器」的通知权限，点允许即可。<br/>
+想要「点击横幅跳回 Cursor」这个增强体验？安装 <code>brew install terminal-notifier</code> 后重启即可自动启用。</p>
 </body>
 </html>`;
 }

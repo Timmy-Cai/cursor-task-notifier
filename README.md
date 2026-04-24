@@ -31,10 +31,16 @@ Cursor 的扩展视图中直接搜索同一名称
 ![img_1.png](img_1.png)
 
 
-安装完成后需手动完成两步：
+**安装即用，无需重启 Cursor**。扩展激活后会自动完成 Hook 部署，
+Cursor 官方对 `hooks.json` 做了热监听会立刻 reload，你可以马上让 Agent 跑任务验收。
 
-1. **重启 Cursor**
-2. **开通通知权限**：系统设置 → 通知 → `terminal-notifier` → 改为「横幅」或「提醒」
+首次安装会弹一个引导条，点「**立即发送演示通知**」会触发一条测试横幅：
+
+- 这时 macOS 会弹出「脚本编辑器」的通知权限申请，点「**允许**」即可
+- 如果不小心错过了，可以去「系统设置 → 通知 → 脚本编辑器」里手动打开
+
+> 💡 **横幅推送开箱即用**，默认走 macOS 自带的 `osascript`，不需要装任何额外工具。
+> 如果想要「点击横幅自动跳回 Cursor」这个增强体验，可以额外 `brew install terminal-notifier`（可选，不装也不影响基础功能）。
 
 ---
 
@@ -100,9 +106,9 @@ Cursor 的扩展视图中直接搜索同一名称
 
 **检查步骤（按顺序排查）：**
 
-1. **确认 terminal-notifier 通知权限**
+1. **确认通知权限已开启**
 
-   系统设置 → 通知 → `terminal-notifier`
+   系统设置 → 通知 → 找到「**脚本编辑器**」（osascript 通道）或「**terminal-notifier**」（如果装了增强版）
 
    - 通知样式必须是「**横幅**」或「**提醒**」，不能是「无」
    - 推荐改为「**提醒**」，不会自动消失
@@ -114,6 +120,10 @@ Cursor 的扩展视图中直接搜索同一名称
 3. **确认通知是否进了通知中心**
 
    从屏幕右上角向下滑，查看通知中心积压的通知
+
+4. **命令面板 → Cursor Task Notifier: 查看当前状态**
+
+   里面会显示当前用的哪条通道、每个依赖是否就绪，一眼定位问题
 
 
 ### 收不到语音播报怎么办？
@@ -138,10 +148,10 @@ say -v "Meijia" "测试"
 |---|---|---|
 | 操作系统 | macOS 13 Ventura 及以上 | 依赖 `lsappinfo` 前台检测 |
 | Cursor | 最新版 | 需支持 Hook 机制（2.x+）|
-| Homebrew | 任意版本 | 用于安装 terminal-notifier |
-| terminal-notifier | 自动安装 | 负责 macOS 横幅推送 |
 | Python3 | 系统自带即可 | 解析 Hook 事件 JSON |
-| Xcode Command Line Tools | 可选 | 编译 `raise-cursor`（点击通知跳回 Cursor）|
+| Homebrew | 可选 | 只有想装 terminal-notifier 时需要 |
+| terminal-notifier | 可选增强 | 装了就启用「点击横幅跳回 Cursor」；不装默认走 osascript |
+| Xcode Command Line Tools | 可选 | 编译 `raise-cursor`（配合 terminal-notifier 用）|
 | 中文语音包 | 可选 | 语音播报功能需在系统设置中下载 |
 
 **安装 Xcode Command Line Tools（如缺失）：**
