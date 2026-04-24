@@ -1,8 +1,10 @@
 #!/bin/bash
-# Cursor Agent 任务完成通知 v4
-# 功能：提示音 + 语音（含项目名）+ 右上角推送（含项目名/任务名/点击跳回）+ 本地日志
+# Cursor Agent 任务完成通知 v5
+# 功能：提示音 + 语音（零依赖默认体验）+ 可选横幅（需 terminal-notifier）+ 本地日志
+# 设计原则：横幅默认关闭，开启必须配合 terminal-notifier —— 不走 osascript 通道，
+#           因为 AppleScript 的点击行为是打开脚本编辑器而非 Cursor，体验不完整。
 # 测试模式：环境变量 CURSOR_NOTIFIER_TEST=1 跳过前台检测 + 跳过 conversation 去重，
-#           用于扩展首次安装时演示通知 / 触发 macOS 通知权限授权。
+#           用于扩展首次安装时演示通知。
 
 input=$(cat 2>/dev/null || echo '{}')
 
@@ -16,7 +18,7 @@ NOTIFY_SOUND=true
 NOTIFY_SOUND_FILE=/System/Library/Sounds/Glass.aiff
 NOTIFY_VOICE=true
 NOTIFY_VOICE_NAME=Meijia
-NOTIFY_BANNER=true
+NOTIFY_BANNER=false
 [[ -f "$CONF_FILE" ]] && source "$CONF_FILE"
 
 # 总开关
@@ -122,29 +124,19 @@ if [[ "$NOTIFY_VOICE" == "true" ]]; then
     fi
 fi
 
-if [[ "$NOTIFY_BANNER" == "true" ]]; then
-    # 通道选择策略：
-    #   1) terminal-notifier（若已安装）：支持「点击横幅跳回 Cursor」+ 同会话合并去重
-    #   2) osascript（系统自带）：零依赖，支持横幅 + 通知中心，不支持点击跳回
-    # 首次使用 osascript 时 macOS 会弹「脚本编辑器」通知权限申请，点允许即可
-    if [[ -n "$TERMINAL_NOTIFIER" && -x "$TERMINAL_NOTIFIER" ]]; then
-        group_id="${conversation_id:-$LOCK_KEY}"
-        notifier_args=(
-            -title "$notify_title"
-            -message "$notify_message"
-            -group "$group_id"
-        )
-        if [[ -x "$RAISE_CURSOR" ]]; then
-            notifier_args+=(-execute "$RAISE_CURSOR")
-        fi
-        "$TERMINAL_NOTIFIER" "${notifier_args[@]}" &
-    else
-        # 转义双引号，防止标题/消息里出现 " 时 AppleScript 解析失败
-        _t="${notify_title//\"/\\\"}"
-        _m="${notify_message//\"/\\\"}"
-        _s="Cursor Task Notifier"
-        osascript -e "display notification \"${_m}\" with title \"${_t}\" subtitle \"${_s}\"" &
+if [[ "$NOTIFY_BANNER" == "true" && -n "$TERMINAL_NOTIFIER" && -x "$TERMINAL_NOTIFIER" ]]; then
+    # 横幅推送：仅在用户开启开关 + 已装 terminal-notifier 时触发
+    # 绝不 fallback 到 osascript —— 因为 AppleScript 点击横幅会打开脚本编辑器而非 Cursor
+    group_id="${conversation_id:-$LOCK_KEY}"
+    notifier_args=(
+        -title "$notify_title"
+        -message "$notify_message"
+        -group "$group_id"
+    )
+    if [[ -x "$RAISE_CURSOR" ]]; then
+        notifier_args+=(-execute "$RAISE_CURSOR")
     fi
+    "$TERMINAL_NOTIFIER" "${notifier_args[@]}" &
 fi
 
 wait

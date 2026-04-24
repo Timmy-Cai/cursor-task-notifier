@@ -2,7 +2,7 @@
   "name": "cursor-task-notifier",
   "displayName": "Cursor Task Notifier",
   "description": "Cursor Agent 任务完成通知配置 — 在设置页一键管理提示音、语音播报、横幅推送",
-  "version": "0.5.2",
+  "version": "0.6.0",
   "publisher": "timmy-ai",
   "license": "MIT",
   "icon": "icon.png",
@@ -32,21 +32,9 @@
         }
       },
       {
-        "id": "banner",
-        "title": "Cursor Task Notifier: 横幅推送",
-        "order": 2,
-        "properties": {
-          "cursorTaskNotifier.banner": {
-            "type": "boolean",
-            "default": true,
-            "description": "横幅推送：macOS 右上角推送通知（含任务描述，点击跳回 Cursor）"
-          }
-        }
-      },
-      {
         "id": "sound",
         "title": "Cursor Task Notifier: 提示音",
-        "order": 3,
+        "order": 2,
         "properties": {
           "cursorTaskNotifier.sound": {
             "type": "boolean",
@@ -74,7 +62,7 @@
       {
         "id": "voice",
         "title": "Cursor Task Notifier: 语音播报",
-        "order": 4,
+        "order": 3,
         "properties": {
           "cursorTaskNotifier.voice": {
             "type": "boolean",
@@ -96,6 +84,18 @@
               "爷爷 — 普通话男声，沉稳厚重", "Flo — 普通话女声，活泼明快",
               "Reed — 普通话男声，干净利落"
             ]
+          }
+        }
+      },
+      {
+        "id": "banner",
+        "title": "Cursor Task Notifier: 横幅推送",
+        "order": 4,
+        "properties": {
+          "cursorTaskNotifier.banner": {
+            "type": "boolean",
+            "default": false,
+            "description": "横幅推送：macOS 右上角推送横幅，点击横幅跳回 Cursor。⚠️ 需要先安装 terminal-notifier（brew install terminal-notifier），否则点击横幅会打开脚本编辑器而非 Cursor。默认关闭，开启时扩展会自动检测并引导安装。"
           }
         }
       }

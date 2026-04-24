@@ -7,7 +7,7 @@ import { execSync } from 'child_process';
 const EXT_ID = 'cursorTaskNotifier';
 const INSTALLED_VERSION_KEY = 'cursorTaskNotifier.installedAssetVersion';
 // 每次修改 hooks/ 里的脚本内容，这个版本号 +1，触发旧用户的 hook 脚本覆盖升级
-const ASSET_VERSION = 4;
+const ASSET_VERSION = 5;
 
 const CONF_COMMENT = `# Cursor Agent 任务完成通知配置
 # 由 Cursor Task Notifier 扩展自动管理，请勿手动修改
@@ -60,7 +60,7 @@ function writeConf(confPath: string, config: vscode.WorkspaceConfiguration): voi
     const soundName = config.get<string>('soundName', 'Glass');
     const voice = config.get<boolean>('voice', true);
     const voiceName = config.get<string>('voiceName', 'Meijia');
-    const banner = config.get<boolean>('banner', true);
+    const banner = config.get<boolean>('banner', false);
 
     const soundFile = SOUND_FILES[soundName ?? 'Glass'] ?? SOUND_FILES['Glass'];
 
@@ -318,32 +318,58 @@ async function showInstallGuidance(
     }
 
     // 首次安装：零重启、开箱即用引导。
-    // Cursor 官方保证 hooks.json 是热监听的，扩展写完后立刻生效，无需重启。
-    // 主动触发一次演示通知，强制 macOS 权限对话框弹出，用户当场看见并授权。
+    // 默认体验：提示音 + 语音，零依赖零权限。
+    // 横幅默认关闭，需要时用户在设置页打开；开启动作会触发 terminal-notifier 引导。
     if (result.isFirstInstall) {
-        const msg = 'Cursor Task Notifier 已就绪，Agent 任务完成后会自动推送 macOS 横幅。'
-            + '首次触发时 macOS 会弹「脚本编辑器」的通知权限申请，请点「允许」。';
+        const msg = 'Cursor Task Notifier 已就绪 🎉\n\n'
+            + '默认会在 Agent 任务完成时播放提示音 + 语音播报，零依赖开箱即用。\n\n'
+            + '想要「右上角横幅推送 + 点击跳回 Cursor」？在设置里开启「横幅推送」，扩展会引导你完成安装。';
 
-        const actions: string[] = ['立即发送演示通知', '打开通知权限设置'];
-        if (!result.terminalNotifierFound) {
-            actions.push('启用点击跳回（可选）');
-        }
-        actions.push('知道了');
-
-        const picked = await vscode.window.showInformationMessage(msg, ...actions);
-        if (picked === '立即发送演示通知') {
-            await fireDemoNotification();
-        } else if (picked === '打开通知权限设置') {
-            try {
-                execSync('open "x-apple.systempreferences:com.apple.preference.notifications"');
-            } catch { /* ignore */ }
-        } else if (picked === '启用点击跳回（可选）') {
-            await installTerminalNotifier();
+        const picked = await vscode.window.showInformationMessage(
+            msg,
+            '打开扩展设置',
+            '知道了'
+        );
+        if (picked === '打开扩展设置') {
+            await vscode.commands.executeCommand(
+                'workbench.action.openSettings',
+                '@ext:timmy-ai.cursor-task-notifier'
+            );
         }
         return;
     }
     // 非首次：不再弹窗打扰。状态可在「查看当前状态」命令里看。
     void context;
+}
+
+// 用户在设置页打开「横幅推送」开关时调用。
+// 若 terminal-notifier 未装，引导用户一键安装；装了则即时响应一声"已开启"。
+async function handleBannerEnabled(): Promise<void> {
+    const tnPath = findTerminalNotifier();
+    if (tnPath) {
+        vscode.window.showInformationMessage(
+            `横幅推送已开启 🚀 使用 terminal-notifier (${tnPath})，点击横幅可直接跳回 Cursor。`
+        );
+        return;
+    }
+
+    const msg = '横幅推送需要 terminal-notifier 才能正常工作 ⚠️\n\n'
+        + '未安装时，macOS 会用 osascript 发出通知，但点击横幅会打开"脚本编辑器"而非 Cursor —— 这是 AppleScript 的系统限制。\n\n'
+        + '建议安装 terminal-notifier（500KB 纯 CLI 工具，无后台服务），开箱支持点击跳回。';
+
+    const picked = await vscode.window.showWarningMessage(
+        msg,
+        '一键安装 terminal-notifier',
+        '先关闭横幅',
+        '我已了解，继续保持'
+    );
+
+    if (picked === '一键安装 terminal-notifier') {
+        await installTerminalNotifier();
+    } else if (picked === '先关闭横幅') {
+        await vscode.workspace.getConfiguration(EXT_ID)
+            .update('banner', false, vscode.ConfigurationTarget.Global);
+    }
 }
 
 async function fireDemoNotification(): Promise<void> {
@@ -365,9 +391,21 @@ async function fireDemoNotification(): Promise<void> {
     } catch {
         // 脚本后台化了提示音/语音/通知，同步返回的 exit code 可能非 0，忽略
     }
-    vscode.window.showInformationMessage(
-        '演示通知已发出。如果没看到横幅，请检查「系统设置 → 通知 → 脚本编辑器」是否允许通知。'
-    );
+    const bannerOn = vscode.workspace.getConfiguration(EXT_ID).get<boolean>('banner', false);
+    const tnInstalled = !!findTerminalNotifier();
+    if (bannerOn && tnInstalled) {
+        vscode.window.showInformationMessage(
+            '演示通知已发出 🎯 右上角应出现横幅，点击即可跳回 Cursor。'
+        );
+    } else if (bannerOn && !tnInstalled) {
+        vscode.window.showWarningMessage(
+            '演示通知已发出，但横幅推送需要 terminal-notifier。请在扩展设置里重新触发开启以完成安装引导，或关闭横幅回到零依赖模式。'
+        );
+    } else {
+        vscode.window.showInformationMessage(
+            '演示已发出 🔔 你应该听到提示音 + 语音播报。想开横幅？在扩展设置里打开「横幅推送」。'
+        );
+    }
 }
 
 async function installTerminalNotifier(): Promise<void> {
@@ -376,7 +414,6 @@ async function installTerminalNotifier(): Promise<void> {
     } catch {
         vscode.window.showErrorMessage(
             '未检测到 Homebrew，请先安装 Homebrew（https://brew.sh），再执行 brew install terminal-notifier。'
-            + '（注意：terminal-notifier 只是可选增强，不装也能正常弹横幅）'
         );
         return;
     }
@@ -385,7 +422,7 @@ async function installTerminalNotifier(): Promise<void> {
     terminal.show();
     terminal.sendText('brew install terminal-notifier');
     vscode.window.showInformationMessage(
-        '已在终端发起 brew install terminal-notifier，安装完成后重启 Cursor 即可启用点击横幅跳回功能。'
+        '已在终端发起 brew install terminal-notifier，装完后下次 Agent 任务完成自动启用横幅 + 点击跳回（无需重启 Cursor）。'
     );
 }
 
@@ -457,6 +494,12 @@ export function activate(context: vscode.ExtensionContext): void {
                             execSync(`say -v "${voiceName}" "任务完成，请查看结果"`, { timeout: 8000 });
                         } catch { /* ignore */ }
                     });
+                }
+
+                // 横幅推送开关从关变开：检查依赖并引导安装 terminal-notifier
+                if (e.affectsConfiguration(`${EXT_ID}.banner`)
+                    && updated.get<boolean>('banner', false)) {
+                    void handleBannerEnabled();
                 }
 
                 vscode.window.setStatusBarMessage('$(check) 通知配置已保存', 3000);
@@ -582,7 +625,7 @@ function buildStatusHtml(
   <tr><td>音效</td><td><span class="accent">🎵 ${soundName}</span></td></tr>
   ${row('语音播报', cfg.get<boolean>('voice', true))}
   <tr><td>语音音色</td><td><span class="accent">🗣️ ${voiceName}</span></td></tr>
-  ${row('横幅推送', cfg.get<boolean>('banner', true))}
+  ${row('横幅推送（可选进阶）', cfg.get<boolean>('banner', false))}
 </table>
 
 <h3>运行时依赖</h3>
@@ -592,21 +635,22 @@ function buildStatusHtml(
   ${existRow('task-done.conf', confExists)}
 </table>
 
-<h3>横幅推送通道</h3>
+<h3>横幅推送状态</h3>
 <table>
-  <tr><td>当前使用</td><td>${runtime.terminalNotifierPath
-      ? `<span class="accent">🚀 terminal-notifier（增强版，支持点击跳回）</span>`
-      : `<span class="accent">🍎 osascript（系统自带，零依赖）</span>`}</td></tr>
+  <tr><td>横幅开关</td><td>${cfg.get<boolean>('banner', false)
+      ? `<span class="on">✅ 已开启</span>`
+      : `<span class="off">⚪ 未开启（默认，在设置里打开即可）</span>`}</td></tr>
   <tr><td>terminal-notifier</td><td>${runtime.terminalNotifierPath
       ? `<span class="on">✅ ${runtime.terminalNotifierPath}</span>`
-      : `<span class="off">⚪ 未安装（可选，不影响基础功能）</span>`}</td></tr>
+      : `<span class="off">❌ 未安装（开启横幅需先安装）</span>`}</td></tr>
   ${existRow('raise-cursor (点击跳回)', runtime.raiseCursorExists,
-      '✅ 已就绪', '⚪ 未部署（需 terminal-notifier 才能用）')}
+      '✅ 已就绪', '⚪ 未部署（装好 terminal-notifier 后自动编译）')}
 </table>
 
 <p class="path">📁 ${confPath}</p>
-<p class="hint">横幅推送默认走 macOS 自带的 osascript，<strong>无需任何安装</strong>。首次弹通知前 macOS 会请求「脚本编辑器」的通知权限，点允许即可。<br/>
-想要「点击横幅跳回 Cursor」这个增强体验？安装 <code>brew install terminal-notifier</code> 后重启即可自动启用。</p>
+<p class="hint">
+<strong>默认体验（零依赖）</strong>：任务完成时提示音 + 语音播报，不触发任何系统通知权限申请。<br/>
+<strong>横幅推送（进阶）</strong>：需安装 <code>brew install terminal-notifier</code>。扩展监测到你打开开关会自动引导。不走 osascript 通道，因为 AppleScript 的点击行为是打开脚本编辑器而非 Cursor，体验不完整。</p>
 </body>
 </html>`;
 }
