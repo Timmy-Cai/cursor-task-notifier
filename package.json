@@ -2,7 +2,7 @@
   "name": "cursor-task-notifier",
   "displayName": "Cursor Task Notifier",
   "description": "Cursor Agent 任务完成通知配置 — 在设置页一键管理提示音、语音播报、横幅推送",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "publisher": "timmy-ai",
   "license": "MIT",
   "icon": "icon.png",

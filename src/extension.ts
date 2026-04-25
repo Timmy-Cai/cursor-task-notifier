@@ -8,6 +8,10 @@ const EXT_ID = 'cursorTaskNotifier';
 const INSTALLED_VERSION_KEY = 'cursorTaskNotifier.installedAssetVersion';
 // 每次修改 hooks/ 里的脚本内容，这个版本号 +1，触发旧用户的 hook 脚本覆盖升级
 const ASSET_VERSION = 5;
+// 一次性迁移标记：v0.6.1 起把 banner 默认值从 true 改为 false。
+// 不论是否已装 terminal-notifier，老用户残留的 banner=true 都重置回新默认。
+// flag 后缀 .v2 是为了让 0.6.1-preview 用户重新触发迁移（旧 flag 残留导致误跳过）。
+const MIGRATION_BANNER_DEFAULT_FALSE = 'cursorTaskNotifier.migrations.bannerDefaultFalse.v2';
 
 const CONF_COMMENT = `# Cursor Agent 任务完成通知配置
 # 由 Cursor Task Notifier 扩展自动管理，请勿手动修改
@@ -372,6 +376,43 @@ async function handleBannerEnabled(): Promise<void> {
     }
 }
 
+// 一次性迁移：v0.6.0 起 banner 默认从 true 改为 false。
+// 老用户的 settings.json / conf 里残留 banner=true 是来自 v0.5.x 的旧默认值，
+// 不能视为"用户主动选择"——重置回新默认值 false，给所有人新的清爽起点。
+// 已装 terminal-notifier 的用户想用横幅，主动打开开关一键即可（扩展会立刻确认"已就绪"，无感切换）。
+async function migrateBannerDefaultIfNeeded(context: vscode.ExtensionContext): Promise<void> {
+    if (context.globalState.get<boolean>(MIGRATION_BANNER_DEFAULT_FALSE, false)) {
+        return;
+    }
+
+    try {
+        const config = vscode.workspace.getConfiguration(EXT_ID);
+        const inspect = config.inspect<boolean>('banner');
+        const userValue = inspect?.globalValue;
+
+        // settings 里显式存的 true（不管是用户改的还是老默认值同步进去的）一律重置
+        if (userValue === true) {
+            // undefined 表示"使用 package.json 里的 default"（即 false）
+            await config.update('banner', undefined, vscode.ConfigurationTarget.Global);
+        }
+
+        // 同步改写 conf 文件里的 NOTIFY_BANNER=true，避免 syncConfToVscode 又把 true 拉回 settings
+        const confPath = getConfPath();
+        if (fs.existsSync(confPath)) {
+            const content = fs.readFileSync(confPath, 'utf-8');
+            const updated = content.replace(/^NOTIFY_BANNER=true$/m, 'NOTIFY_BANNER=false');
+            if (updated !== content) {
+                fs.writeFileSync(confPath, updated, 'utf-8');
+            }
+        }
+    } catch {
+        // 迁移失败不影响功能，下次启动还会再尝试（不打 flag）
+        return;
+    }
+
+    await context.globalState.update(MIGRATION_BANNER_DEFAULT_FALSE, true);
+}
+
 async function fireDemoNotification(): Promise<void> {
     const script = getHookScriptPath();
     if (!fs.existsSync(script)) {
@@ -426,18 +467,22 @@ async function installTerminalNotifier(): Promise<void> {
     );
 }
 
-export function activate(context: vscode.ExtensionContext): void {
+export async function activate(context: vscode.ExtensionContext): Promise<void> {
     const config = vscode.workspace.getConfiguration(EXT_ID);
     const confPath = getConfPath();
 
     // 先部署 hook 运行所需的一切资源
     const deployResult = ensureHooksInstalled(context, config);
 
+    // 一次性迁移：v0.6.0 banner 默认值改为 false 后，先于 syncConfToVscode 跑，
+    // 把老用户残留的 banner=true（无 tn 状态）刷回新默认值，避免被 conf 反向拉回
+    await migrateBannerDefaultIfNeeded(context);
+
     // 异步弹引导（不阻塞 activate）
     showInstallGuidance(context, deployResult).catch(() => {});
 
     if (fs.existsSync(confPath)) {
-        syncConfToVscode(confPath).catch(() => {});
+        await syncConfToVscode(confPath).catch(() => {});
     } else {
         writeConf(confPath, config);
     }
